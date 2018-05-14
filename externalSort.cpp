@@ -34,18 +34,28 @@ using std::vector;
 using std::pair;
 using std::make_pair;
 
+// Performs a 2-way merge on the sorted chunks to produce a sorted output.
 void
 merge(std::vector<std::string> &arr, int startA, int endA, int startB, int endB, std::vector<std::string> &sortedArr);
 
+// Implements merge sort
 void mergeSort(std::vector<std::string> &arr, int start, int end, std::vector<std::string> &sortedArr);
 
+// Performs a k-way merge of k sorted chunks to produce a sorted output
 void nWayMerge(string &partSortFile, unsigned long runSize, unsigned long remRecords);
 
+// Sorts the records of fileName from startRecNum to startRecNum + numRec
+void sortedRuns(string &file, unsigned long startRecNum, unsigned long numRec);
+
+// Counters to keep track of number of records read from and written to disk
 std::atomic<unsigned long> readRecs{0};
 std::atomic<unsigned long> writeRecs{0};
 
 
 class HandleIO {
+/*
+ * Class to deal with file IO. Given a filename, it gets records from the file as well as write records to a file
+ * */
 
 private:
     std::fstream fileStream;
@@ -109,17 +119,6 @@ public:
             _setData(buffer, NTHREADS * linesPerThread, startLineNum + NTHREADS * linesPerThread, remLines);
         }
         writeRecs += numberOfLines;
-/*
-        fileStream.clear();
-        fileStream.seekp(startLineNum * REC_SIZE, std::ios::beg);
-        for (int i = 0; i < numberOfLines; ++i) {
-            fileStream << buffer[i] + "\n";
-        }
-        if (fileStream.fail() || fileStream.bad()) {
-            throw std::runtime_error("Write Failed.!");
-        }
-        fileStream.flush();
-*/
     }
 
     ~HandleIO() {
@@ -128,6 +127,9 @@ public:
 };
 
 class Block {
+    /*
+     * Block stores a given number of records from particular file and gives access to the records via [] operator.
+     * */
 private:
     std::unique_ptr<HandleIO> file_; // Handle to deal with I/O
     unsigned long numRecords;   // Number of records allowed in Block.
@@ -138,6 +140,7 @@ private:
     bool stopRead;              // Set this to true when all the records from the corresponding sortedRun are read.
     vector<string> data;        // Data in the block.
 public:
+
     explicit Block(string &fileName, unsigned long numRecords, unsigned long startPos, unsigned long runSize,
                    std::ios_base::openmode mode = std::ios::in | std::ios::out) {
         try {
@@ -192,8 +195,6 @@ public:
             numRecords = _runSize - _recsFetched;
             assert(numRecords >= 0);
             flag = true;
-            //cout << "Tried to fetch more records than that exits. Exiting..";
-            //exit(-1);
         }
 
         try {
@@ -232,34 +233,6 @@ public:
     }
 };
 
-void sortedRuns(string &file, unsigned long startRecNum, unsigned long numRec);
-
-void sortedRuns(string &fileName, unsigned long startRecNum, unsigned long numRec) {
-    std::vector<std::string> arr(numRec);
-    HandleIO *file_;
-    try {
-        file_ = new HandleIO(fileName);
-        file_->getData(arr, startRecNum, numRec);
-    }
-    catch (std::exception &exp) {
-        cout << exp.what();
-        exit(-1);
-    }
-    auto sortedArr = std::vector<std::string>(arr);
-
-    std::cout << arr.size() << std::endl;
-    mergeSort(arr, 0, arr.size() - 1, sortedArr);
-
-    try {
-        file_->setData(sortedArr, startRecNum, numRec);
-    }
-    catch (std::exception &exp) {
-        cout << exp.what();
-        exit(-1);
-    }
-    delete file_;
-}
-
 int main() {
 
     string fileName;
@@ -279,29 +252,6 @@ int main() {
 
     cout << numRuns << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
-/*
-    remRecs = TOT_REC - ((TOT_REC / RECS_IN_MEM) * RECS_IN_MEM);
-
-    for (int j = 0; j < TOT_REC / RECS_IN_MEM; ++j) {
-        remRecs = remRecs + RECS_IN_MEM - (runSize * NTHREADS);
-        for (int i = 0; i < NTHREADS; ++i) {
-            threads[i] = thread(sortedRuns, std::ref(*file_), i * runSize, runSize);
-        }
-
-        for (auto &thread_ : threads) {
-            if (thread_.joinable())
-                thread_.join();
-        }
-    }
-
-    if (remRecs > RECS_IN_MEM) {
-        cout << "Not implemented";
-        exit(-1);
-
-    } else if (remRecs > 1) {
-
-        sortedRuns(*file_, TOT_REC - remRecs, remRecs);
-    }*/
 
 #pragma omp parallel for num_threads(NTHREADS)
     for (unsigned int i = 0; i < numRuns; ++i) {
@@ -331,21 +281,46 @@ int main() {
     return 0;
 }
 
+// Sorts the records of fileName from startRecNum to startRecNum + numRec
+void sortedRuns(string &fileName, unsigned long startRecNum, unsigned long numRec) {
+    std::vector<std::string> arr(numRec);
+    HandleIO *file_;
+    try {
+        file_ = new HandleIO(fileName);
+        file_->getData(arr, startRecNum, numRec);
+    }
+    catch (std::exception &exp) {
+        cout << exp.what();
+        exit(-1);
+    }
+    auto sortedArr = std::vector<std::string>(arr);
 
+    std::cout << arr.size() << std::endl;
+    mergeSort(arr, 0, arr.size() - 1, sortedArr);
+
+    try {
+        file_->setData(sortedArr, startRecNum, numRec);
+    }
+    catch (std::exception &exp) {
+        cout << exp.what();
+        exit(-1);
+    }
+    delete file_;
+}
+
+// Implementation of merge sort
 void mergeSort(std::vector<std::string> &arr, int start, int end, std::vector<std::string> &sortedArr) {
     int arrLen = end - start + 1;
     if (arrLen <= 1) return;
     auto partition = static_cast<int>(std::ceil((start + end) / 2.00) - 1);
 
-    //thread t1(mergeSort, std::ref(sortedArr), start, partition, std::ref(arr));
     mergeSort(sortedArr, start, partition, arr);
     mergeSort(sortedArr, partition + 1, end, arr);
-    //if (t1.joinable())
-    //  t1.join();
     merge(arr, start, partition, partition + 1, end, sortedArr);
 }
 
 
+// Performs a 2-way merge on the sorted chunks to produce a sorted output.
 void
 merge(std::vector<std::string> &arr, int startA, int endA, int startB, int endB, std::vector<std::string> &sortedArr) {
     int i = startA; // Pointer to arr A
@@ -383,6 +358,7 @@ merge(std::vector<std::string> &arr, int startA, int endA, int startB, int endB,
 
 }
 
+// Performs a k-way merge of k sorted chunks to produce a sorted output
 void nWayMerge(string &partSortFile, unsigned long numRuns, unsigned long remRecords) {
 
     HandleIO *file_;
@@ -408,10 +384,8 @@ void nWayMerge(string &partSortFile, unsigned long numRuns, unsigned long remRec
     auto recsInBlock = static_cast<unsigned long>(floor(RECS_IN_MEM * NTHREADS / (numBlocks + 1)));
 
     vector<Block> blocks(numBlocks);
-    //string resultFile = "/home/pvkc/Downloads/gensort-linux-1.5/64/tenGBSorted";
     string resultFile;
-    resultFile = "/tmp/oneGBSorted";
-    //resultFile = "/tmp/sortOpt";
+    resultFile = "/tmp/oneTBSorted";
     Block result(resultFile, recsInBlock, 0, TOT_REC, std::ios::out);
 
     unsigned int n = 0;
