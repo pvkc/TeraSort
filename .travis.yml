@@ -3,6 +3,9 @@ sudo: false
 language: cpp
 compiler: gcc
 
+notifications:
+  email: false
+
 addons:
   apt:
     sources:
