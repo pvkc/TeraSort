@@ -8,16 +8,22 @@
 #include <cassert>
 #include <atomic>
 
-#define NTHREADS 2
+// Number of threads available in the system
+#define NTHREADS 16
 #define KB 1024L
 #define MB (1024*KB)
 #define GB (1024*MB)
+
+// Define the record length and key length in bytes
 #define KEY_SIZE 10
 #define REC_SIZE 100
-//#define TOT_REC 107374184 // 10 GB
-#define TOT_REC 10737419 // 1 GB
+
+// Number of records in the input
+#define TOT_REC 10995116278 // 1 TB 
+// #define TOT_REC 10737419 // 1 GB
 // #define TOT_REC 10000
-// TOT_REC  MUST be a integer multiple RECS_IN_MEM
+
+// Total records allowed in memory
 #define RECS_IN_MEM (TOT_REC/(NTHREADS*10))
 
 //using namespace std;
@@ -34,8 +40,9 @@ merge(std::vector<std::string> &arr, int startA, int endA, int startB, int endB,
 void mergeSort(std::vector<std::string> &arr, int start, int end, std::vector<std::string> &sortedArr);
 
 void nWayMerge(string &partSortFile, unsigned long runSize, unsigned long remRecords);
-std::atomic<unsigned long> readRecs {0};
-std::atomic<unsigned long> writeRecs {0};
+
+std::atomic<unsigned long> readRecs{0};
+std::atomic<unsigned long> writeRecs{0};
 
 
 class HandleIO {
@@ -45,26 +52,27 @@ private:
     std::ios_base::openmode _mode;
     string fileName;
 
-    void _setData(vector<string> &buffer, unsigned long buffStart, unsigned long startLine, unsigned long numLines){
+    void _setData(vector<string> &buffer, unsigned long buffStart, unsigned long startLine, unsigned long numLines) {
         fileStream.clear();
         fileStream.seekp(startLine * REC_SIZE, std::ios::beg);
         for (int i = 0; i < numLines; ++i) {
             fileStream << buffer[buffStart + i] + "\n";
         }
-        if (fileStream.fail() || fileStream.bad()){
+        if (fileStream.fail() || fileStream.bad()) {
             throw std::runtime_error("Write Failed");
         }
         fileStream.flush();
     }
 
-    void _getData(vector<string> &buffer, unsigned long buffStart, unsigned long startLine, unsigned long numLines){
-        fileStream.seekg(startLine*REC_SIZE, std::ios::beg);
+    void _getData(vector<string> &buffer, unsigned long buffStart, unsigned long startLine, unsigned long numLines) {
+        fileStream.seekg(startLine * REC_SIZE, std::ios::beg);
         for (int i = 0; i < numLines; ++i) {
-            if(!getline(fileStream, buffer[buffStart + i])){
+            if (!getline(fileStream, buffer[buffStart + i])) {
                 throw std::runtime_error("File doesn't have said number of lines");
             }
         }
     }
+
 public:
     explicit HandleIO(const string &fileName, std::ios_base::openmode mode = std::ios::in | std::ios::out) {
         this->fileName = fileName;
@@ -84,34 +92,21 @@ public:
                 throw std::runtime_error("File does not have said number of lines");
             }
         }
-/*
-        unsigned int IOThreads = NTHREADS;
-        unsigned long linesPerThread = numberOfLines/(IOThreads);
-#pragma omp parallel for num_threads(IOThreads)
-        for (int i = 0; i < IOThreads; ++i) {
-            HandleIO threadIO(this->fileName);
-            threadIO._setData(buffer, i*linesPerThread, startLineNum + i*linesPerThread,linesPerThread);
-        }
-        unsigned long remLines = numberOfLines - (linesPerThread * IOThreads);
-        if (remLines > 0){
-            _getData(buffer, IOThreads*linesPerThread, startLineNum + IOThreads*linesPerThread, remLines);
-        }
-*/
         readRecs += numberOfLines;
     }
 
 
     void setData(vector<string> &buffer, unsigned long startLineNum, unsigned long numberOfLines) {
 
-        unsigned long linesPerThread = numberOfLines/(NTHREADS);
+        unsigned long linesPerThread = numberOfLines / (NTHREADS);
 #pragma omp parallel for num_threads(NTHREADS)
         for (int i = 0; i < NTHREADS; ++i) {
             HandleIO threadIO(this->fileName);
-            threadIO._setData(buffer, i*linesPerThread, startLineNum + i*linesPerThread, linesPerThread);
+            threadIO._setData(buffer, i * linesPerThread, startLineNum + i * linesPerThread, linesPerThread);
         }
         unsigned long remLines = numberOfLines - (linesPerThread * NTHREADS);
-        if (remLines > 0){
-            _setData(buffer, NTHREADS*linesPerThread, startLineNum + NTHREADS*linesPerThread, remLines);
+        if (remLines > 0) {
+            _setData(buffer, NTHREADS * linesPerThread, startLineNum + NTHREADS * linesPerThread, remLines);
         }
         writeRecs += numberOfLines;
 /*
@@ -221,7 +216,7 @@ public:
         this->readBlock(this->startPos);
     }
 
-    void setData(vector<string> data_){
+    void setData(vector<string> data_) {
         this->data = data_;
     }
 
@@ -346,7 +341,7 @@ void mergeSort(std::vector<std::string> &arr, int start, int end, std::vector<st
     mergeSort(sortedArr, start, partition, arr);
     mergeSort(sortedArr, partition + 1, end, arr);
     //if (t1.joinable())
-      //  t1.join();
+    //  t1.join();
     merge(arr, start, partition, partition + 1, end, sortedArr);
 }
 
@@ -436,11 +431,10 @@ void nWayMerge(string &partSortFile, unsigned long numRuns, unsigned long remRec
 
     if (remRecords > 0) {
         blocks[numBlocks - 1] = Block(partSortFile, recsInBlock, n * RECS_IN_MEM, remRecords);
+    } else {
+        blocks[numBlocks - 1] = Block(partSortFile, recsInBlock, n * RECS_IN_MEM, RECS_IN_MEM);
     }
-    else{
-        blocks[numBlocks -1] = Block(partSortFile, recsInBlock, n* RECS_IN_MEM, RECS_IN_MEM);
-    }
-    blocks[numBlocks-1].readBlock();
+    blocks[numBlocks - 1].readBlock();
 
 
     auto cmpFunc = [](const pair<string, pair<int, int> > &str1, const pair<string, pair<int, int> > &str2) {
@@ -480,7 +474,7 @@ void nWayMerge(string &partSortFile, unsigned long numRuns, unsigned long remRec
                 }
             }
         }
-        if (t1.joinable()){
+        if (t1.joinable()) {
             t1.join();
         }
         result.setData(res);
